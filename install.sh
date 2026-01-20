@@ -335,6 +335,12 @@ EOF
 configure_acme_account() {
     local acme_account_conf="/root/.acme.sh/account.conf"
     mkdir -p /root/.acme.sh
+    if [[ -f "$acme_account_conf" ]]; then
+        return 0
+    fi
+    if [[ -z "$acme_email" ]]; then
+        acme_email="${ACME_EMAIL}"
+    fi
     cat <<EOF > "$acme_account_conf"
 #LOG_FILE="/root/.acme.sh/acme.sh.log"
 #LOG_LEVEL=1
@@ -354,26 +360,37 @@ issue_certificate() {
     if [[ -z "$acme_email" ]]; then
         acme_email="${ACME_EMAIL}"
     fi
-    if [[ -z "$acme_email" ]]; then
-        echo -e "${red}缺少 ACME 邮箱，请使用 --acme-email 或设置 ACME_EMAIL${plain}"
-        exit 1
-    fi
-    configure_acme_account
     mkdir -p /etc/V2bX/
     local acme_sh="/root/.acme.sh/acme.sh"
     if [[ ! -f "$acme_sh" ]]; then
+        if [[ -z "$acme_email" ]]; then
+            echo -e "${red}缺少 ACME 邮箱，请使用 --acme-email 或设置 ACME_EMAIL${plain}"
+            exit 1
+        fi
         curl https://get.acme.sh | sh -s email="$acme_email"
     fi
     if [[ ! -f "$acme_sh" ]]; then
         echo -e "${red}acme.sh 安装失败${plain}"
         exit 1
     fi
+    configure_acme_account
     if [[ -z "$cf_token" ]]; then
         if [[ -z "$cf_key" ]]; then
             cf_key="${CF_Key}"
         fi
         if [[ -z "$cf_email" ]]; then
             cf_email="${CF_Email}"
+        fi
+        if [[ -z "$cf_key" || -z "$cf_email" ]]; then
+            local acme_account_conf="/root/.acme.sh/account.conf"
+            if [[ -f "$acme_account_conf" ]]; then
+                if [[ -z "$cf_key" ]]; then
+                    cf_key=$(grep -E "^SAVED_CF_Key=" "$acme_account_conf" | head -1 | cut -d"'" -f2)
+                fi
+                if [[ -z "$cf_email" ]]; then
+                    cf_email=$(grep -E "^SAVED_CF_Email=" "$acme_account_conf" | head -1 | cut -d"'" -f2)
+                fi
+            fi
         fi
         if [[ -z "$cf_key" || -z "$cf_email" ]]; then
             echo -e "${red}缺少 Cloudflare DNS 凭证 (CF_Token 或 CF_Key/CF_Email)${plain}"
