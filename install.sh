@@ -439,8 +439,24 @@ install_V2bX() {
         echo -e "${red}必须提供仓库地址用于下载 V2bX 包${plain}"
         exit 1
     fi
-    local remote_zip="${repo_base_url}/scripts/packages/${last_version}/V2bX-linux-${arch}.zip"
+    local remote_zip=""
+    if [[ "$repo_base_url" == *"/releases/download" ]]; then
+        remote_zip="${repo_base_url}/${last_version}/V2bX-linux-${arch}.zip"
+    else
+        remote_zip="${repo_base_url}/scripts/packages/${last_version}/V2bX-linux-${arch}.zip"
+    fi
     curl -fL --retry 3 --connect-timeout 10 --max-time 300 -o /usr/local/V2bX/V2bX-linux.zip "$remote_zip" >/dev/null 2>&1
+    if [[ $? != 0 ]]; then
+        if [[ "$last_version" == v* ]]; then
+            local alt_version="${last_version#v}"
+            if [[ "$repo_base_url" == *"/releases/download" ]]; then
+                remote_zip="${repo_base_url}/${alt_version}/V2bX-linux-${arch}.zip"
+            else
+                remote_zip="${repo_base_url}/scripts/packages/${alt_version}/V2bX-linux-${arch}.zip"
+            fi
+            curl -fL --retry 3 --connect-timeout 10 --max-time 300 -o /usr/local/V2bX/V2bX-linux.zip "$remote_zip" >/dev/null 2>&1
+        fi
+    fi
     if [[ $? != 0 ]]; then
         echo -e "${red}下载 V2bX 安装包失败${plain}"
         exit 1
