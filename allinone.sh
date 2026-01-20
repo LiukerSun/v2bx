@@ -8,10 +8,8 @@ plain='\033[0m'
 cur_dir=$(pwd)
 script_dir=$(cd "$(dirname "$0")" && pwd)
 
-# check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
 
-# check os
 if [[ -f /etc/redhat-release ]]; then
     release="centos"
 elif cat /etc/issue | grep -Eqi "alpine"; then
@@ -51,7 +49,6 @@ if [ "$(getconf WORD_BIT)" != '32' ] && [ "$(getconf LONG_BIT)" != '64' ] ; then
     exit 2
 fi
 
-# os version
 if [[ -f /etc/os-release ]]; then
     os_version=$(awk -F'[= ."]' '/VERSION_ID/{print $3}' /etc/os-release)
 fi
@@ -96,7 +93,6 @@ install_base() {
     fi
 }
 
-# 0: running, 1: not running, 2: not installed
 check_status() {
     if [[ ! -f /usr/local/V2bX/V2bX ]]; then
         return 2
@@ -120,9 +116,9 @@ check_status() {
 
 check_ipv6_support() {
     if ip -6 addr | grep -q "inet6"; then
-        echo "1"  # 支持 IPv6
+        echo "1"
     else
-        echo "0"  # 不支持 IPv6
+        echo "0"
     fi
 }
 
@@ -132,15 +128,12 @@ parse_config_file() {
         echo -e "${red}配置文件不存在: $file${plain}"
         exit 1
     fi
-    
-    # Simple parser for config section
     backend_url=$(grep "backend_url:" "$file" | head -1 | awk -F': ' '{print $2}' | tr -d '"' | tr -d "'")
     backend_key=$(grep "backend_key:" "$file" | head -1 | awk -F': ' '{print $2}' | tr -d '"' | tr -d "'")
     node_id=$(grep "node_id:" "$file" | head -1 | awk -F': ' '{print $2}' | tr -d '"' | tr -d "'")
     core_type=$(grep "core_type:" "$file" | head -1 | awk -F': ' '{print $2}' | tr -d '"' | tr -d "'")
     transport_type=$(grep "transport_type:" "$file" | head -1 | awk -F': ' '{print $2}' | tr -d '"' | tr -d "'")
     cert_domain=$(grep "cert_domain:" "$file" | head -1 | awk -F': ' '{print $2}' | tr -d '"' | tr -d "'")
-    
     if [[ -z "$backend_url" || -z "$backend_key" || -z "$node_id" ]]; then
         echo -e "${red}配置文件缺少必要信息 (backend_url, backend_key, node_id)${plain}"
         exit 1
@@ -258,7 +251,6 @@ auto_generate_config() {
 EOF
 )
     fi
-    # Add other core types support if needed in future
     
     cat <<EOF > /etc/V2bX/config.json
 {
@@ -271,7 +263,6 @@ EOF
 }
 EOF
 
-    # Create custom_outbound.json
     cat <<EOF > /etc/V2bX/custom_outbound.json
 [
     {
@@ -295,7 +286,6 @@ EOF
 ]
 EOF
 
-    # Create route.json
     cat <<EOF > /etc/V2bX/route.json
 {
     "domainStrategy": "AsIs",
@@ -342,11 +332,6 @@ configure_acme_account() {
         acme_email="${ACME_EMAIL}"
     fi
     cat <<EOF > "$acme_account_conf"
-#LOG_FILE="/root/.acme.sh/acme.sh.log"
-#LOG_LEVEL=1
-#AUTO_UPGRADE="1"
-#NO_TIMESTAMP=1
-
 UPGRADE_HASH='1bd2922bc37cddba97765af2ae12ad5441c91a74'
 ACCOUNT_EMAIL='${acme_email}'
 USER_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
@@ -549,24 +534,80 @@ EOF
     if [[ ! -f /etc/V2bX/custom_inbound.json ]]; then
         cp custom_inbound.json /etc/V2bX/
     fi
-    if [[ ! -f "${script_dir}/V2bX.sh" ]]; then
-        echo -e "${red}缺少本地脚本: ${script_dir}/V2bX.sh${plain}"
+    cat <<'EOF' > /usr/bin/V2bX
+#!/bin/bash
+cmd="$1"
+if [[ -z "$cmd" ]]; then
+    echo "用法: V2bX {start|stop|restart|status|log|logs|enable|disable|config}"
+    exit 1
+fi
+if command -v systemctl >/dev/null 2>&1; then
+    svc_start="systemctl start V2bX"
+    svc_stop="systemctl stop V2bX"
+    svc_restart="systemctl restart V2bX"
+    svc_status="systemctl status V2bX --no-pager"
+    svc_enable="systemctl enable V2bX"
+    svc_disable="systemctl disable V2bX"
+else
+    svc_start="service V2bX start"
+    svc_stop="service V2bX stop"
+    svc_restart="service V2bX restart"
+    svc_status="service V2bX status"
+    svc_enable="rc-update add V2bX default"
+    svc_disable="rc-update del V2bX default"
+fi
+case "$cmd" in
+    start)
+        $svc_start
+        ;;
+    stop)
+        $svc_stop
+        ;;
+    restart)
+        $svc_restart
+        ;;
+    status)
+        $svc_status
+        ;;
+    log|logs)
+        if command -v journalctl >/dev/null 2>&1; then
+            journalctl -u V2bX -e --no-pager
+        elif [[ -f /etc/V2bX/error.log ]]; then
+            tail -n 200 /etc/V2bX/error.log
+        else
+            echo "未找到日志"
+            exit 1
+        fi
+        ;;
+    enable)
+        $svc_enable
+        ;;
+    disable)
+        $svc_disable
+        ;;
+    config)
+        if [[ -f /etc/V2bX/config.json ]]; then
+            cat /etc/V2bX/config.json
+        else
+            echo "未找到配置文件"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "用法: V2bX {start|stop|restart|status|log|logs|enable|disable|config}"
         exit 1
-    fi
-    cp "${script_dir}/V2bX.sh" /usr/bin/V2bX
+        ;;
+esac
+EOF
     chmod +x /usr/bin/V2bX
     if [ ! -L /usr/bin/v2bx ]; then
         ln -s /usr/bin/V2bX /usr/bin/v2bx
         chmod +x /usr/bin/v2bx
     fi
     cd $cur_dir
-    rm -f install.sh
-    if [[ -n "$config_file_path" ]]; then
+    if [[ "$auto_config_enabled" == true ]]; then
         issue_certificate
         auto_generate_config
-    else
-        echo -e "${red}未提供配置文件，无法自动配置${plain}"
-        exit 1
     fi
 }
 
@@ -586,11 +627,21 @@ cf_key=""
 cf_email=""
 cf_token=""
 cf_account_id=""
+auto_config_enabled=false
+
+trim_value() {
+    local v="$1"
+    v="${v//\`/}"
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    echo "$v"
+}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --config|-c)
             config_file_path="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --version|-v)
@@ -603,50 +654,62 @@ while [[ $# -gt 0 ]]; do
             ;;
         --backend-url)
             backend_url="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --backend-key)
             backend_key="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --node-id)
             node_id="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --core-type)
             core_type="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --transport-type)
             transport_type="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --cert-domain)
             cert_domain="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --acme-email)
             acme_email="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --cf-key)
             cf_key="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --cf-email)
             cf_email="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --cf-token)
             cf_token="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         --cf-account-id)
             cf_account_id="$2"
+            auto_config_enabled=true
             shift 2
             ;;
         *.yml|*.yaml)
             config_file_path="$1"
+            auto_config_enabled=true
             shift
             ;;
         *)
@@ -661,11 +724,20 @@ done
 if [[ -z "$version" ]]; then
     version="v0.4.1"
 fi
+if [[ "$version" != v* ]]; then
+    version="v$version"
+fi
+
+repo_base_url=$(trim_value "$repo_base_url")
+backend_url=$(trim_value "$backend_url")
+cert_domain=$(trim_value "$cert_domain")
 
 if [[ -n "$config_file_path" ]]; then
     parse_config_file "$config_file_path"
 fi
 
-validate_config
+if [[ "$auto_config_enabled" == true ]]; then
+    validate_config
+fi
 
 install_V2bX "$version"
