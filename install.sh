@@ -325,16 +325,39 @@ EOF
 configure_acme_account() {
     local acme_account_conf="/root/.acme.sh/account.conf"
     mkdir -p /root/.acme.sh
-    if [[ -f "$acme_account_conf" ]]; then
-        return 0
-    fi
     if [[ -z "$acme_email" ]]; then
         acme_email="${ACME_EMAIL}"
     fi
+    local cf_key_value="$cf_key"
+    local cf_email_value="$cf_email"
+    if [[ -z "$cf_key_value" ]]; then
+        cf_key_value="${CF_Key}"
+    fi
+    if [[ -z "$cf_email_value" ]]; then
+        cf_email_value="${CF_Email}"
+    fi
+    if [[ -z "$acme_email" || -z "$cf_key_value" || -z "$cf_email_value" ]]; then
+        echo -e "${red}缺少 ACME 邮箱或 Cloudflare 凭证${plain}"
+        exit 1
+    fi
+    local acme_email_sanitized="${acme_email//\'/}"
+    local cf_key_sanitized="${cf_key_value//\'/}"
+    local cf_email_sanitized="${cf_email_value//\'/}"
+    local default_acme_server="https://acme-v02.api.letsencrypt.org/directory"
     cat <<EOF > "$acme_account_conf"
+#LOG_FILE="/root/.acme.sh/acme.sh.log"
+#LOG_LEVEL=1
+
+#AUTO_UPGRADE="1"
+
+#NO_TIMESTAMP=1
+
 UPGRADE_HASH='1bd2922bc37cddba97765af2ae12ad5441c91a74'
-ACCOUNT_EMAIL='${acme_email}'
+ACCOUNT_EMAIL='${acme_email_sanitized}'
+SAVED_CF_Key='${cf_key_sanitized}'
+SAVED_CF_Email='${cf_email_sanitized}'
 USER_PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+DEFAULT_ACME_SERVER='${default_acme_server}'
 EOF
 }
 
@@ -359,56 +382,41 @@ issue_certificate() {
         exit 1
     fi
     configure_acme_account
-    if [[ -z "$cf_token" ]]; then
-        if [[ -z "$cf_key" ]]; then
-            cf_key="${CF_Key}"
-        fi
-        if [[ -z "$cf_email" ]]; then
-            cf_email="${CF_Email}"
-        fi
-        if [[ -z "$cf_key" || -z "$cf_email" ]]; then
-            local acme_account_conf="/root/.acme.sh/account.conf"
-            if [[ -f "$acme_account_conf" ]]; then
-                if [[ -z "$cf_key" ]]; then
-                    cf_key=$(grep -E "^SAVED_CF_Key=" "$acme_account_conf" | head -1 | cut -d"'" -f2)
-                fi
-                if [[ -z "$cf_email" ]]; then
-                    cf_email=$(grep -E "^SAVED_CF_Email=" "$acme_account_conf" | head -1 | cut -d"'" -f2)
-                fi
+    if [[ -z "$cf_key" ]]; then
+        cf_key="${CF_Key}"
+    fi
+    if [[ -z "$cf_email" ]]; then
+        cf_email="${CF_Email}"
+    fi
+    if [[ -z "$cf_key" || -z "$cf_email" ]]; then
+        local acme_account_conf="/root/.acme.sh/account.conf"
+        if [[ -f "$acme_account_conf" ]]; then
+            if [[ -z "$cf_key" ]]; then
+                cf_key=$(grep -E "^SAVED_CF_Key=" "$acme_account_conf" | head -1 | cut -d"'" -f2)
+            fi
+            if [[ -z "$cf_email" ]]; then
+                cf_email=$(grep -E "^SAVED_CF_Email=" "$acme_account_conf" | head -1 | cut -d"'" -f2)
             fi
         fi
-        if [[ -z "$cf_key" || -z "$cf_email" ]]; then
-            echo -e "${red}缺少 Cloudflare DNS 凭证 (CF_Token 或 CF_Key/CF_Email)${plain}"
-            exit 1
-        fi
-        export CF_Key="$cf_key"
-        export CF_Email="$cf_email"
-    else
-        export CF_Token="$cf_token"
-        if [[ -z "$cf_account_id" ]]; then
-            cf_account_id="${CF_Account_ID}"
-        fi
-        if [[ -n "$cf_account_id" ]]; then
-            export CF_Account_ID="$cf_account_id"
-        fi
     fi
-    if [[ -z "$CF_Token" && ( -z "$CF_Key" || -z "$CF_Email" ) ]]; then
-        echo -e "${red}缺少 Cloudflare DNS 凭证 (CF_Token 或 CF_Key/CF_Email)${plain}"
+    if [[ -z "$cf_key" || -z "$cf_email" ]]; then
+        echo -e "${red}缺少 Cloudflare DNS 凭证 (CF_Key/CF_Email)${plain}"
         exit 1
     fi
-    "$acme_sh" --set-default-ca --server letsencrypt
-    "$acme_sh" --issue --force -d "$cert_domain" --dns dns_cf
+    export CF_Key="$cf_key"
+    export CF_Email="$cf_email"
+    "$acme_sh" --force --issue -d "$cert_domain" --dns dns_cf
     if [[ $? != 0 ]]; then
         echo -e "${red}证书申请失败${plain}"
         exit 1
     fi
-    "$acme_sh" --install-cert -d "$cert_domain" \
-        --key-file /etc/V2bX/cert.key \
-        --fullchain-file /etc/V2bX/fullchain.cer
-    if [[ $? != 0 ]]; then
-        echo -e "${red}证书安装失败${plain}"
+    local cert_source_dir="/root/.acme.sh/${cert_domain}_ecc"
+    if [[ ! -f "${cert_source_dir}/fullchain.cer" || ! -f "${cert_source_dir}/${cert_domain}.key" ]]; then
+        echo -e "${red}证书文件不存在，请检查 acme.sh 输出${plain}"
         exit 1
     fi
+    cp "${cert_source_dir}/fullchain.cer" /etc/V2bX/fullchain.cer
+    cp "${cert_source_dir}/${cert_domain}.key" /etc/V2bX/cert.key
 }
 
 install_V2bX() {
