@@ -435,6 +435,14 @@ issue_certificate() {
 }
 
 install_V2bX() {
+    if [[ -f /usr/local/V2bX/V2bX && "$force_reinstall" != true ]]; then
+        if [[ x"${release}" == x"alpine" ]]; then
+            service V2bX start
+        else
+            systemctl start V2bX
+        fi
+        return 0
+    fi
     if [[ -e /usr/local/V2bX/ ]]; then
         rm -rf /usr/local/V2bX/
     fi
@@ -651,6 +659,7 @@ cf_email=""
 cf_token=""
 cf_account_id=""
 auto_config_enabled=false
+force_reinstall=false
 
 trim_value() {
     local v="$1"
@@ -704,6 +713,10 @@ while [[ $# -gt 0 ]]; do
             cert_domain="$2"
             auto_config_enabled=true
             shift 2
+            ;;
+        --force-reinstall)
+            force_reinstall=true
+            shift
             ;;
         --acme-email)
             acme_email="$2"
