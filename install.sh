@@ -153,6 +153,9 @@ auto_generate_config() {
     local core_sing=false
     local core_hysteria2=false
     
+    core_type=$(echo "$core_type" | tr '[:upper:]' '[:lower:]')
+    transport_type=$(echo "$transport_type" | tr '[:upper:]' '[:lower:]')
+
     if [[ "$core_type" == "xray" ]]; then
         core="xray"
         core_xray=true
@@ -164,7 +167,7 @@ auto_generate_config() {
         core_hysteria2=true
     fi
     
-    local node_type=$(echo "$transport_type" | tr '[:upper:]' '[:lower:]')
+    local node_type="$transport_type"
     local cert_mode="none"
     if [[ -n "$cert_domain" ]]; then
         cert_mode="file"
@@ -309,6 +312,18 @@ EOF
     ]
 }
 EOF
+
+    if [ "$core_sing" = true ]; then
+        if [[ ! -f /etc/V2bX/sing_origin.json ]]; then
+            cat <<EOF > /etc/V2bX/sing_origin.json
+{
+    "log": {
+        "level": "error"
+    }
+}
+EOF
+        fi
+    fi
     
     if [[ x"${release}" == x"alpine" ]]; then
         service V2bX restart
